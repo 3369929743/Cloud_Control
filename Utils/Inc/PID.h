@@ -1,17 +1,30 @@
 #ifndef __PID_H__
 #define __PID_H__
 
+#include <stdint.h>
+
+#define PID_USE_FLOAT 1
+// #define PID_USE_FLOAT 0
+
+#if PID_USE_FLOAT
+    typedef float PID_val;
+#else
+    typedef int32_t PID_val;
+    #define MULTIPLE 10
+    #define PID_ZOOM (1 << MULTIPLE)
+#endif
+
 typedef struct
 {
-	float Kp, Ki, Kd;
+    PID_val Kp, Ki, Kd;
 
-	float Pre_Error, Cur_Error, ErrorInt, IntMax, IntMin;
+    PID_val Pre_Error, Cur_Error, ErrorInt, IntMax, IntMin;
 
-    float Actual, Target;
+    PID_val Actual, Target;
 
-    float OutMax, OutMin;
+    PID_val OutMax, OutMin;
 
-	float Output;
+    PID_val Output;
 } PID_t;
 
 typedef struct {
@@ -23,10 +36,10 @@ typedef struct {
 }PID_confg_t;
 
 void PID_Init(PID_t *PID, PID_confg_t *Config);
-void PID_Set_Target(PID_t *PID, float Target);
-void PID_Set_Actual(PID_t *PID, float Actual);
-void PID_Update(PID_t *PID);
-float PID_Get_Output(PID_t *PID);
-float PID_Calculate(PID_t *PID, float Actual);
+void PID_Clear(PID_t *PID);
+void PID_Set_Target(PID_t *PID, PID_val Target);
+void PID_Set_Actual(PID_t *PID, PID_val Actual);
+PID_val PID_Get_Output(PID_t *PID);
+PID_val PID_Calculate(PID_t *PID, PID_val Actual);
 
 #endif
