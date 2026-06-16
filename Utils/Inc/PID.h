@@ -3,8 +3,8 @@
 
 #include <stdint.h>
 
-#define PID_USE_FLOAT 1
-// #define PID_USE_FLOAT 0
+// #define PID_USE_FLOAT 1
+#define PID_USE_FLOAT 0
 
 #if PID_USE_FLOAT
     typedef float PID_val;
@@ -25,6 +25,8 @@ typedef struct
     PID_val OutMax, OutMin;
 
     PID_val Output;
+
+    PID_val Alpha, Error_Rate_Filter;
 } PID_t;
 
 typedef struct {
@@ -33,6 +35,8 @@ typedef struct {
     float IntMax, IntMin;
 
     float OutMax, OutMin;
+
+    float Alpha;
 }PID_confg_t;
 
 void PID_Init(PID_t *PID, PID_confg_t *Config);
@@ -41,5 +45,6 @@ void PID_Set_Target(PID_t *PID, PID_val Target);
 void PID_Set_Actual(PID_t *PID, PID_val Actual);
 PID_val PID_Get_Output(PID_t *PID);
 PID_val PID_Calculate(PID_t *PID, PID_val Actual);
+void PID_Change_Param(PID_t *PID, float Kp, float Ki, float Kd, float Alpha);
 
 #endif
