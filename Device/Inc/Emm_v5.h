@@ -1,7 +1,6 @@
 #ifndef __EMM_V5_H__
 #define __EMM_V5_H__
 
-#include "main.h"
 #include "Serial.h"
 #include "stdbool.h"
 

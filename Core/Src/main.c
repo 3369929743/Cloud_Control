@@ -23,9 +23,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "K230.h"
 #include "OLED.h"
-#include "Serial.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -46,7 +44,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-Serial_t Serial;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -94,10 +92,6 @@ int main(void)
   MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
   OLED_Init();
-  K230_Init(&huart1);
-  Serial_Init(&Serial, &huart2);
-  Serial_Printf(&Serial, "Hello, World!\r\n");
-  Serial_Printf(&Serial, "0x%02X\r\n", 0x01);
   OLED_ShowString(1, 1, "Hello, World!");
   /* USER CODE END 2 */
 
@@ -105,12 +99,6 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    if(K230_GetFlag()){
-      if(Error_Update()){
-        OLED_ShowSignedNum(2, 1, K230_GetError_x(),4);
-        OLED_ShowSignedNum(2, 8, K230_GetError_y(),4);
-      }
-    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -172,17 +160,17 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 {
-    K230_Tick(huart, Size);
+
 }
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
-    Serial_SendComplete(huart, &Serial);
+
 }
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
-    K230_Error_Handler(huart);
+
 }
 /* USER CODE END 4 */
 
