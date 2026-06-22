@@ -1,8 +1,10 @@
 #ifndef __EMM_V5_H__
 #define __EMM_V5_H__
 
-#include "Serial.h"
 #include "stdbool.h"
+#include <stdint.h>
+
+typedef struct Serial_Struct Serial_t;
 
 typedef struct {
     Serial_t *Serial;     // 串口结构体指针

@@ -117,3 +117,29 @@ void Serial_Printf(Serial_t *Serial, char *Format, ...)
     Serial_Start_Send(Serial, Size);
     va_end(Args);
 }
+
+/**
+ * @brief  启动串口空闲中断接收
+ * @param  Serial: 串口句柄指针
+ * @param  Buffer: 接收数据缓冲区指针
+ * @param  Size: 接收数据缓冲区大小
+ * @retval 无
+ */
+void Serial_ReceiveToIdle_IT(Serial_t *Serial, uint8_t *Buffer, uint16_t Size)
+{
+    HAL_UARTEx_ReceiveToIdle_IT(Serial->huart, Buffer, Size);
+}
+
+/**
+ * @brief  清除串口错误标志并重新启动接收
+ * @param  Serial: 串口句柄指针
+ * @param  Buffer: 接收数据缓冲区指针
+ * @param  Size: 接收数据缓冲区大小
+ * @retval 无
+ */
+void Serial_Error_Clear(Serial_t *Serial, uint8_t* Buffer, uint16_t Size)
+{
+    (void)Serial->huart->Instance->SR;  // 读取状态寄存器清除错误标志
+    (void)Serial->huart->Instance->DR;  // 读取数据寄存器清除接收数据
+    Serial_ReceiveToIdle_IT(Serial, Buffer, Size); // 启动接收中断
+}
