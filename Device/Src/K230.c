@@ -4,15 +4,17 @@
 
 #define K230_RX_BUFFER_SIZE 12
 
-typedef uint8_t K230_BUFFSIZE_t;
+typedef uint16_t K230_BUFFSIZE_t;
+
+static void K230_Rx_Event(Serial_t *Serial,uint16_t Size);
 
 typedef struct {
     Serial_t *Serial;
     uint8_t BufferA[K230_RX_BUFFER_SIZE];
     uint8_t BufferB[K230_RX_BUFFER_SIZE];
-    K230_BUFFSIZE_t Size;
-    uint8_t* Processptr;
-    uint8_t* Readptr;
+    __IO K230_BUFFSIZE_t Size;
+    uint8_t* __IO Processptr;
+    uint8_t* __IO Readptr;
     __IO uint8_t BufferFlag;  //数据就绪标志
     int16_t Offset_x;
     int16_t Offset_y;
@@ -44,6 +46,7 @@ void K230_Init(Serial_t *Serial, int16_t Offset_x, int16_t Offset_y)
     K230_Buffer.BufferFlag = 0;
     // 启动串口空闲中断接收，数据将存入Processptr指向的缓冲区
     Serial_ReceiveToIdle_IT(Serial, K230_Buffer.Processptr, K230_RX_BUFFER_SIZE);
+    Serial->RxCallback = K230_Rx_Event;
 }
 
 /**
@@ -52,7 +55,7 @@ void K230_Init(Serial_t *Serial, int16_t Offset_x, int16_t Offset_y)
  * @note   数据帧格式：帧头(0xAA 0x55) + Error_x(2字节小端序) + Error_y(2字节小端序)
  *         解析后会自动加上预设的偏移量(Offset_x和Offset_y)
  */
-uint8_t Error_Update(void)
+uint8_t K230_Error_Update(void)
 {
     if (K230_Buffer.Size == 6) {
         if(K230_Buffer.Readptr[0] == 0xAA && K230_Buffer.Readptr[1] == 0x55){
@@ -79,13 +82,17 @@ uint8_t K230_GetFlag(void)
 }
 
 /**
- * @brief  K230串口接收事件处理函数（在中断回调中调用）
- * @param  Serial: 串口句柄指针，用于匹配对应的串口外设
- * @param  Size: 本次接收到的数据字节数
- * @note   该函数实现双缓冲区切换机制：更新读取指针指向刚接收完的数据，
- *         切换处理指针到另一个缓冲区，设置数据就绪标志，并重新启动空闲中断接收
+ * @brief K230串口接收事件处理函数（在中断回调中调用）
+ * @param Serial 串口对象指针，用于匹配对应的串口外设
+ * @param Size 本次接收到的数据字节数
+ * @note 该函数实现双缓冲区切换机制：
+ *       1. 验证串口对象是否匹配，不匹配则直接返回
+ *       2. 更新接收数据大小，将读取指针指向刚接收完的数据缓冲区
+ *       3. 切换处理指针到另一个缓冲区（BufferA <-> BufferB交替）
+ *       4. 设置数据就绪标志，通知上层有新数据可处理
+ *       5. 重新启动空闲中断接收，继续接收下一帧数据
  */
-void K230_Tick(Serial_t *Serial,uint8_t Size)
+static void K230_Rx_Event(Serial_t *Serial,uint16_t Size)
 {
     if(Serial != K230_Buffer.Serial){
         return;
@@ -118,18 +125,4 @@ int16_t K230_GetError_x(void)
 int16_t K230_GetError_y(void)
 {
     return K230_Buffer.Error_y;
-}
-
-/**
- * @brief  K230串口错误处理函数（在错误中断回调中调用）
- * @param  Serial: 串口句柄指针，用于匹配对应的串口外设
- * @note   该函数用于清除UART错误标志（读取SR和DR寄存器），并重新启动空闲中断接收，
- *         确保串口在发生错误后能够恢复正常工作
- */
-void K230_Error_Handler(Serial_t *Serial)
-{
-    if(Serial != K230_Buffer.Serial){
-        return;
-    }
-    Serial_Error_Clear(Serial, K230_Buffer.Processptr, K230_RX_BUFFER_SIZE);
 }

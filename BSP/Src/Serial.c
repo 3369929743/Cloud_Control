@@ -3,17 +3,62 @@
 #include <stdint.h>
 #include "stdarg.h"
 #include "stdio.h"
+#include "usart.h"
+
+static UART_HandleTypeDef* const Serial_Map[] = {
+    NULL,
+    &huart1,
+    &huart2,
+    &huart3,
+};
+
+#define SERIAL_MAX_NUM (sizeof(Serial_Map) / sizeof(Serial_Map[0]))
+
+static Serial_t *Serial_Instance[SERIAL_MAX_NUM] = {NULL};    
+
+/**
+ * @brief 根据UART句柄获取对应的串口对象实例
+ * @param huart UART句柄指针
+ * @return Serial_t* 返回对应的串口对象指针，如果未找到则返回NULL
+ * @note 该函数通过比较UART外设实例地址来查找已注册的串口对象，
+ *       支持USART1、USART2、USART3三个串口实例
+ */
+static inline Serial_t *Serial_GetInstance(UART_HandleTypeDef *huart)
+{
+    switch((uint32_t)huart->Instance)
+    {
+        case (uint32_t)USART1:
+            return Serial_Instance[1];
+        case (uint32_t)USART2:
+            return Serial_Instance[2];
+        case (uint32_t)USART3:
+            return Serial_Instance[3];
+        default:
+            return NULL;
+    }
+}
 
 /**
  * @brief 初始化串口对象
  * @param Serial 串口对象指针
- * @param huart UART句柄指针，指向已配置的UART外设句柄
- * @note 该函数将UART句柄绑定到串口对象，并将isBusy标志清零表示串口空闲
+ * @param Serial_Num 串口编号
+ * @return uint8_t 返回0表示初始化成功，返回1表示参数错误（编号超出范围或为0）
+ * @note 该函数将指定编号的UART句柄映射到串口对象，初始化状态标志和回调函数，
+ *       并将串口对象注册到实例数组中
  */
-void Serial_Init(Serial_t *Serial, UART_HandleTypeDef *huart)
+uint8_t Serial_Init(Serial_t *Serial, uint8_t Serial_Num)
 {
-    Serial->huart = huart;
+    if(Serial_Num >= SERIAL_MAX_NUM || Serial_Num == 0)
+    {
+        return 1;
+    }
+    Serial->huart = Serial_Map[Serial_Num];
     Serial->isBusy = 0;
+    Serial_Instance[Serial_Num] = Serial;
+    Serial->RxCallback = NULL;
+    Serial->TxCallback = NULL;
+    Serial->ErrorCallback = NULL;
+    return 0;
 }
 
 /**
@@ -83,20 +128,6 @@ uint8_t Serial_SendString(Serial_t *Serial, char *String)
 }
 
 /**
- * @brief 串口发送完成回调处理函数
- * @param huart UART句柄指针，用于匹配对应的串口外设
- * @param Serial 串口对象指针
- * @note 当UART中断发送完成时调用，若句柄匹配则将isBusy标志清零，表示串口恢复空闲状态
- */
-void Serial_SendComplete(UART_HandleTypeDef *huart, Serial_t *Serial)
-{
-    if(huart == Serial->huart)
-    {
-        Serial->isBusy = 0;
-    }
-}
-
-/**
  * @brief 通过串口发送格式化字符串（类似printf）
  * @param Serial 串口对象指针
  * @param Format 格式化字符串指针，支持printf风格的格式说明符
@@ -110,36 +141,115 @@ void Serial_Printf(Serial_t *Serial, char *Format, ...)
     va_list Args;
     va_start(Args, Format);
     uint16_t Size = vsnprintf((char *)Serial->TxBuffer, (int)TxBuffer_Size, Format, Args);
-    if(Size > TxBuffer_Size)
+    if(Size >= TxBuffer_Size)
     {
-        Size = TxBuffer_Size;
+        Size = TxBuffer_Size - 1;
     }
     Serial_Start_Send(Serial, Size);
     va_end(Args);
 }
 
 /**
- * @brief  启动串口空闲中断接收
- * @param  Serial: 串口句柄指针
- * @param  Buffer: 接收数据缓冲区指针
- * @param  Size: 接收数据缓冲区大小
- * @retval 无
+ * @brief 启动串口空闲中断接收模式
+ * @param Serial 串口对象指针
+ * @param Buffer 接收数据缓冲区指针
+ * @param Size 接收缓冲区大小（字节数）
+ * @note 该函数配置串口以空闲中断方式接收数据，当检测到总线空闲或缓冲区满时触发接收完成事件；
+ *       调用前需确保Serial不为NULL，否则直接返回
  */
 void Serial_ReceiveToIdle_IT(Serial_t *Serial, uint8_t *Buffer, uint16_t Size)
 {
+    if(Serial == NULL) return;
+    Serial->pRxBuff = Buffer;
+    Serial->RxSize = Size;
     HAL_UARTEx_ReceiveToIdle_IT(Serial->huart, Buffer, Size);
 }
 
 /**
- * @brief  清除串口错误标志并重新启动接收
- * @param  Serial: 串口句柄指针
- * @param  Buffer: 接收数据缓冲区指针
- * @param  Size: 接收数据缓冲区大小
- * @retval 无
+ * @brief 清除串口错误标志并重新启动接收
+ * @param Serial 串口对象指针
+ * @note 该函数通过读取状态寄存器(SR)和数据寄存器(DR)来清除串口错误标志；
+ *       清除错误后，如果接收缓冲区有效，则自动重新启动空闲中断接收
  */
-void Serial_Error_Clear(Serial_t *Serial, uint8_t* Buffer, uint16_t Size)
+static void Serial_Error_Clear(Serial_t *Serial)
 {
-    (void)Serial->huart->Instance->SR;  // 读取状态寄存器清除错误标志
-    (void)Serial->huart->Instance->DR;  // 读取数据寄存器清除接收数据
-    Serial_ReceiveToIdle_IT(Serial, Buffer, Size); // 启动接收中断
+    if(Serial == NULL) return;
+    
+    __HAL_UART_CLEAR_FEFLAG(Serial->huart);
+    __HAL_UART_CLEAR_PEFLAG(Serial->huart);
+    __HAL_UART_CLEAR_NEFLAG(Serial->huart);
+    __HAL_UART_CLEAR_OREFLAG(Serial->huart);
+
+    if(Serial->pRxBuff != NULL){
+        Serial_ReceiveToIdle_IT(Serial, Serial->pRxBuff, Serial->RxSize); // 启动接收中断
+    }
+}
+
+/**
+ * @brief UART接收完成回调函数（HAL库中断回调）
+ * @param huart UART句柄指针
+ * @note 该函数由HAL库在UART接收完成时自动调用；
+ *       函数会获取对应的串口对象实例，如果注册了接收回调函数，则调用用户回调并传入参数1表示接收完成
+ */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  Serial_t *Serial = Serial_GetInstance(huart);
+  if(Serial && Serial->RxCallback)
+  {
+    Serial->RxCallback(Serial, 1);
+  }
+}
+
+/**
+ * @brief UART接收事件回调函数（HAL库空闲中断回调）
+ * @param huart UART句柄指针
+ * @param Size 实际接收到的数据长度（字节数）
+ * @note 该函数由HAL库在UART空闲中断或接收事件发生时自动调用；
+ *       函数会获取对应的串口对象实例，如果注册了接收回调函数，则调用用户回调并传入实际接收的数据长度
+ */
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
+{
+  Serial_t *Serial = Serial_GetInstance(huart);
+  if(Serial && Serial->RxCallback)
+  {
+    Serial->RxCallback(Serial, Size);
+  }
+}
+
+/**
+ * @brief UART发送完成回调函数（HAL库中断回调）
+ * @param huart UART句柄指针
+ * @note 该函数由HAL库在UART发送完成时自动调用；
+ *       函数会将isBusy标志清零表示串口空闲，如果注册了发送回调函数，则调用用户回调
+ */
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+  Serial_t *Serial = Serial_GetInstance(huart);
+  if(Serial)
+  {
+    Serial->isBusy = 0;
+    if(Serial->TxCallback)
+    {
+      Serial->TxCallback(Serial);
+    }
+  }
+}
+
+/**
+ * @brief UART错误回调函数（HAL库中断回调）
+ * @param huart UART句柄指针
+ * @note 该函数由HAL库在UART发生错误时自动调用；
+ *       函数会先清除错误标志并重新启动接收，如果注册了错误回调函数，则调用用户回调
+ */
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+  Serial_t *Serial = Serial_GetInstance(huart);
+  if(Serial)
+  {
+    Serial_Error_Clear(Serial);
+    if(Serial->ErrorCallback)
+    {
+        Serial->ErrorCallback(Serial);
+    }
+  }
 }

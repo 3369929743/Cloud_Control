@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "Emm_v5.h"
 #include "usart.h"
 #include "gpio.h"
 
@@ -146,32 +147,7 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-/**
-  * @brief  UART接收完成回调函数
-  * @note   当UART接收中断完成时，HAL库会自动调用此函数
-  * @param  huart: UART句柄指针
-  * @retval None
-  */
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-  // 用户可在此处添加UART接收完成后的处理逻辑
-  // 例如：解析接收到的数据、触发后续操作等
-}
 
-void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
-{
-
-}
-
-void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
-{
-
-}
-
-void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
-{
-
-}
 /* USER CODE END 4 */
 
 /**

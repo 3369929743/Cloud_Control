@@ -37,9 +37,9 @@ typedef struct {
     float OutMax, OutMin;
 
     float Alpha;
-}PID_confg_t;
+}PID_Confg_t;
 
-void PID_Init(PID_t *PID, PID_confg_t *Config);
+void PID_Init(PID_t *PID, PID_Confg_t *Config);
 void PID_Clear(PID_t *PID);
 void PID_Set_Target(PID_t *PID, PID_val Target);
 void PID_Set_Actual(PID_t *PID, PID_val Actual);

@@ -1,4 +1,6 @@
 #include "PID.h"
+#include <limits.h>
+#include <float.h>
 
 /**
   * @brief  PID控制器初始化函数
@@ -11,41 +13,44 @@
   *         - 初始化完成后自动调用PID_Clear清除所有状态变量
   * @warning 调用此函数会清除PID的历史状态（误差、积分、输出等）
   */
-void PID_Init(PID_t *PID, PID_confg_t *Config)
+/**
+  * @brief  PID控制器初始化
+  * @param  PID: PID控制器结构体指针
+  * @param  Config: PID配置参数(Kp/Ki/Kd/限幅/滤波系数)
+  * @retval 无
+  * @note   初始化后自动清零状态
+  */
+void PID_Init(PID_t *PID, PID_Confg_t *Config)
 {
-    /* 检查平滑系数合法性：若为0则设置为1.0（完全不滤波） */
+    /* 滤波系数修正 */
     if(Config->Alpha == 0)
     {
         Config->Alpha = 1.0f;
     }
     
 #if PID_USE_FLOAT
-    /* ========== 浮点型模式：直接赋值配置参数 ========== */
-    PID->Kp = Config->Kp;              /* 比例系数：决定系统对当前误差的响应强度 */
-    PID->Ki = Config->Ki;              /* 积分系数：决定系统对累积误差的响应强度，用于消除稳态误差 */
-    PID->Kd = Config->Kd;              /* 微分系数：决定系统对误差变化率的响应强度，用于抑制超调 */
-    PID->IntMax = Config->IntMax;      /* 积分项上限：防止积分饱和导致系统失控 */
-    /* 积分项下限：若配置为0则自动设置为IntMax的负值，实现对称限幅 */
+    /* 浮点模式 */
+    PID->Kp = Config->Kp;
+    PID->Ki = Config->Ki;
+    PID->Kd = Config->Kd;
+    PID->IntMax = (Config->IntMax == 0) ? FLT_MAX : Config->IntMax;
     PID->IntMin = (Config->IntMin == 0) ? -PID->IntMax : Config->IntMin;
-    PID->OutMax = Config->OutMax;      /* PID输出上限：确保控制量在安全范围内 */
-    /* PID输出下限：若配置为0则自动设置为OutMax的负值，实现对称限幅 */
+    PID->OutMax = (Config->OutMax == 0) ? FLT_MAX : Config->OutMax;
     PID->OutMin = (Config->OutMin == 0) ? -PID->OutMax : Config->OutMin;
-    PID->Alpha = Config->Alpha;        /* 微分项低通滤波系数：0~1之间，值越大滤波效果越弱 */
+    PID->Alpha = Config->Alpha;
 #else
-    /* ========== 定点型模式：将浮点参数放大PID_ZOOM倍转换为整型 ========== */
-    PID->Kp = (PID_val)(Config->Kp * PID_ZOOM);    /* 比例系数（定点化）：放大后保留小数精度 */
-    PID->Ki = (PID_val)(Config->Ki * PID_ZOOM);    /* 积分系数（定点化）：放大后保留小数精度 */
-    PID->Kd = (PID_val)(Config->Kd * PID_ZOOM);    /* 微分系数（定点化）：放大后保留小数精度 */
-    PID->IntMax = (PID_val)Config->IntMax;         /* 积分项上限（定点化） */
-    /* 积分项下限：若配置为0则自动设置为IntMax的负值，实现对称限幅 */
+    /* 定点模式: 放大转整型 */
+    PID->Kp = (PID_val)(Config->Kp * PID_ZOOM);
+    PID->Ki = (PID_val)(Config->Ki * PID_ZOOM);
+    PID->Kd = (PID_val)(Config->Kd * PID_ZOOM);
+    PID->IntMax = (Config->IntMax == 0) ? INT32_MAX : Config->IntMax;
     PID->IntMin = (Config->IntMin == 0) ? -PID->IntMax : Config->IntMin;
-    PID->OutMax = (PID_val)Config->OutMax;         /* PID输出上限（定点化） */
-    /* PID输出下限：若配置为0则自动设置为OutMax的负值，实现对称限幅 */
+    PID->OutMax = (Config->OutMax == 0) ? INT32_MAX : Config->OutMax;
     PID->OutMin = (Config->OutMin == 0) ? -PID->OutMax : Config->OutMin;
-    PID->Alpha = (PID_val)(Config->Alpha * PID_ZOOM);  /* 微分项滤波系数（定点化） */
+    PID->Alpha = (PID_val)(Config->Alpha * PID_ZOOM);
 #endif
     
-    /* 清除PID状态变量：将误差、积分、输出等全部清零，确保从干净状态开始 */
+    /* 清零状态 */
     PID_Clear(PID);
 }
 
@@ -63,8 +68,6 @@ void PID_Clear(PID_t *PID)
     PID->Pre_Error = 0;          /* 上一次误差清零：清除微分项的历史参考值 */
     PID->Cur_Error = 0;          /* 当前误差清零：确保下次计算从零开始 */
     PID->Output = 0;             /* PID输出值清零：复位控制量输出 */
-    PID->Target = 0;             /* 目标设定值清零：清除期望值 */
-    PID->Actual = 0;             /* 实际反馈值清零：清除测量值 */
     PID->Error_Rate_Filter = 0;  /* 误差变化率滤波值清零：复位微分项低通滤波器状态 */
 }
 
@@ -162,14 +165,15 @@ static void PID_Update(PID_t *PID)
     /* ========== 第三步：定点模式 - 微分项滤波 + PID计算 ========== */
     /* 定点化一阶低通滤波：
      * - 使用PID_Restore还原历史滤波项，避免定点数乘法溢出
-     * - (PID_ZOOM - PID->Alpha) 等价于浮点模式的 (1 - Alpha) */
-    PID->Error_Rate_Filter = (PID->Cur_Error - PID->Pre_Error) * PID->Alpha + PID_Restore((int64_t)PID->Error_Rate_Filter * (PID_ZOOM - PID->Alpha));
+     * - (PID_ZOOM - PID->Alpha) 等价于浮点模式的 (1 - Alpha) 
+     * - 这是D项   */
+    PID->Error_Rate_Filter = PID_Restore((int64_t)(PID->Cur_Error - PID->Pre_Error) * PID->Alpha + (int64_t)PID->Error_Rate_Filter * (PID_ZOOM - PID->Alpha));
     
     /* 定点化PID核心公式：
      * - 使用int64_t中间变量防止乘法运算溢出
      * - Kd项的滤波结果需要单独还原（PID_Restore）
      * - 最终输出需要整体还原（PID_Restore） */
-    int64_t Temp = (int64_t)PID->Kp * PID->Cur_Error + (int64_t)PID->Ki * PID->ErrorInt + PID_Restore((int64_t)PID->Kd * PID->Error_Rate_Filter);
+    int64_t Temp = (int64_t)PID->Kp * PID->Cur_Error + (int64_t)PID->Ki * PID->ErrorInt + (int64_t)PID->Kd * PID->Error_Rate_Filter;
     PID->Output = PID_Restore(Temp);                                    /* 最终输出还原：将定点数转换回原始数值范围 */
 #endif
     
@@ -223,27 +227,35 @@ PID_val PID_Calculate(PID_t *PID, PID_val Actual)
 /**
   * @brief  动态修改PID参数
   * @param  PID: PID控制器结构体指针
-  * @param  Kp: 新的比例系数
-  * @param  Ki: 新的积分系数
-  * @param  Kd: 新的微分系数
+  * @param  Kp: 比例系数
+  * @param  Ki: 积分系数
+  * @param  Kd: 微分系数
+  * @param  Alpha: 滤波系数(0表示不滤波)
   * @retval 无
-  * @note   修改参数后会自动清除PID状态，防止旧状态与新参数不匹配
+  * @note   修改后自动清零状态，防止新旧参数不匹配
   */
 void PID_Change_Param(PID_t *PID, float Kp, float Ki, float Kd, float Alpha)
 {
-    if(Alpha == 0) Alpha = 1.0f; // 避免除零错误
+    /* 滤波系数修正 */
+    if(Alpha == 0)
+    {
+        Alpha = 1.0f;
+    }
+    
 #if PID_USE_FLOAT
-    /* 浮点型模式：直接赋值 */
-    PID->Alpha = Alpha;        // 更新积分系数
-    PID->Kp = Kp;              // 更新比例系数
-    PID->Ki = Ki;              // 更新积分系数
-    PID->Kd = Kd;              // 更新微分系数
+    /* 浮点模式: 直接赋值 */
+    PID->Alpha = Alpha;
+    PID->Kp = Kp;
+    PID->Ki = Ki;
+    PID->Kd = Kd;
 #else
-    /* 定点型模式：放大后转换为整型 */
-    PID->Alpha = (PID_val)(Alpha * PID_ZOOM); // 更新积分系数（定点化）
-    PID->Kp = (PID_val)(Kp * PID_ZOOM);    // 更新比例系数（定点化）
-    PID->Ki = (PID_val)(Ki * PID_ZOOM);    // 更新积分系数（定点化）
-    PID->Kd = (PID_val)(Kd * PID_ZOOM);    // 更新微分系数（定点化）
+    /* 定点模式: 放大转整型 */
+    PID->Alpha = (PID_val)(Alpha * PID_ZOOM);
+    PID->Kp = (PID_val)(Kp * PID_ZOOM);
+    PID->Ki = (PID_val)(Ki * PID_ZOOM);
+    PID->Kd = (PID_val)(Kd * PID_ZOOM);
 #endif
-    PID_Clear(PID);  // 清除PID状态，确保新参数生效时从零开始
+    
+    /* 清零状态 */
+    PID_Clear(PID);
 }
